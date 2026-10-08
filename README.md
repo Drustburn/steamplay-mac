@@ -38,13 +38,14 @@ macOS client's `steamclient.dylib`, so Steam features (overlay, achievements, cl
   - D3D11 through **DXMT**: feature level 11_0, adapter "Apple M3 Max".
   - D3D11 and D3D12 through **D3DMetal**: DXR tier 1.1.
   - wined3d as the fallback.
-- **AION 2** (Steam 3393110, UE5, DX12, NC Guard anti-cheat):
+- **AION 2** (Steam 3393110, UE5, DX12, NC Guard anti-cheat), with no launch options:
   - NC Guard initialises completely (`initialize:: done`).
   - The Steam overlay attaches.
-  - The 3D title screen renders through D3DMetal.
+  - The 3D title screen renders through D3DMetal (picked automatically).
+  - The game reaches server selection. Character creation could not be tested on launch day,
+    because the servers were full.
 
-  CrossOver 26 and other Wine/GPTK setups hang at the splash screen at this point. Getting past
-  the title screen is still being investigated.
+  CrossOver 26 and other Wine/GPTK setups hang at the splash screen.
 
 ## Requirements
 
