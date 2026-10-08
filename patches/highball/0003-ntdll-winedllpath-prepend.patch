@@ -1,0 +1,37 @@
+ntdll: honour WINEDLLPATH_PREPEND, directories searched before the engine's own builtins.
+
+Highball puts its renderer overlays (DXMT, DXVK, D3DMetal, d9vk) in front of Wine's own
+Direct3D through WINEDLLPATH_PREPEND, the mechanism Sikarugir's engines and Apple's Game
+Porting Toolkit Wine carry. The CrossOver tree only knows WINEDLLPATH, which is searched after
+the engine's lib directory, so every overlay was silently ignored on this engine: games ran on
+wined3d over Vulkan, launchers that need DXMT failed their Direct3D 11 checks, and a render
+smoke that "passed" had never touched DXMT (2026-09-04, M1 Pro, macOS 26.6.2). This is the
+MacPorts game-porting-toolkit patch 1005-ntdll-d3dmetal-env.diff, unchanged.
+Upstream status: not upstreamable as is (Wine has WINEDLLPATH only); kept as engine data.
+
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -596,13 +596,22 @@ static const char *get_pe_dir( WORD machine )
+ static void set_dll_path(void)
+ {
+     char *p, *path = getenv( "WINEDLLPATH" );
++    char *path_prepend = getenv( "WINEDLLPATH_PREPEND" );
+     int i, count = 0;
+ 
+-    if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
++    if (path) for (p = path, count++; *p; p++) if (*p == ':') count++;
++    if (path_prepend) for (p = path_prepend, count++; *p; p++) if (*p == ':') count++;
+ 
+     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
+     count = 0;
+ 
++    if (path_prepend)
++    {
++        path_prepend = strdup( path_prepend );
++        for (p = strtok( path_prepend, ":" ); p; p = strtok( NULL, ":" )) dll_paths[count++] = strdup( p );
++        free( path_prepend );
++    }
++
+     if (!build_dir) dll_paths[count++] = dll_dir;
+ 
+     if (path)

@@ -1,0 +1,8 @@
+# fetched or generated, never committed
+/build/
+/dist/
+/downloads/
+/sources/
+/src/
+/tests/*.exe
+.DS_Store

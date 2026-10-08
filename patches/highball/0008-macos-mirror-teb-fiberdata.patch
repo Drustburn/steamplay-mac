@@ -1,0 +1,114 @@
+macOS: mirror Tib.FiberData into the %gs block so GetCurrentFiber() works.
+
+On macOS the %gs base is the host thread block rather than the TEB, so
+signal_init_process() mirrors individual TEB fields into it: Tib.Self,
+ThreadLocalStoragePointer and Peb. Tib.FiberData is not mirrored.
+
+GetCurrentFiber() is a compiler intrinsic that reads %gs:0x20 directly, so Wine
+never sees the call and cannot correct the value. A game whose job system reads
+it therefore gets a host value and passes it straight back to SwitchToFiber,
+which dereferences it and faults.
+
+MEASURED (M1 Pro, macOS 26.6.2, engine x64-crossover26.3-r4, 2026-09-09):
+
+  * Inside Wine, gs:0x30 and gs:0x60 track the TEB and PEB correctly, while
+    gs:0x20 returns a constant 0x8ff on every thread and does not follow writes
+    to TEB->Tib.FiberData. Wine's own fiber bookkeeping is correct throughout;
+    only the mirror is missing.
+  * Marvel's Guardians of the Galaxy (Steam 1088850) renders its splash under
+    D3DMetal and then faults on "Play Game" reading 0x907, which is 0x8ff + 8,
+    the offset SwitchToFiber reads from the fiber it is handed.
+  * Writing the mirror by hand from PE code makes GetCurrentFiber() return the
+    real fiber, and fiber switching then works end to end, including
+    SwitchToFiber(GetCurrentFiber()), the pattern that faults without it.
+    Reproducer: private/notes/fibertest3.c in the Highball repo, no game needed.
+
+COST, also measured. Offset 0x20 is not a free slot on macOS: in a plain
+x86_64 process it holds the thread's pthread QoS class, reading 0x20ff for
+QOS_CLASS_USER_INTERACTIVE, 0x4ff for UTILITY and 0x2ff for BACKGROUND. The
+three slots Wine already mirrors into (0x30, 0x58, 0x60) read zero there, so
+they are free and 0x20 is not. Windows puts Tib.FiberData at the offset macOS
+uses for the QoS cache, and the ABI fixes both, so a correct GetCurrentFiber()
+and an intact QoS cache cannot both be had on this platform. This patch takes
+the fiber pointer and loses the QoS cache, which is a userspace value read by
+libdispatch and pthread for scheduling hints. The loss is confined to threads
+that call the fiber APIs, which is why the mirror is not also written at thread
+start: doing that would clear the QoS slot on every thread for no gain, since
+Tib.FiberData is NULL there anyway. Reproducer: private/notes/tsdslot.c.
+
+The guard is __x86_64__ alone rather than __APPLE__. dlls/kernelbase is built
+by the mingw cross-compiler for PE, where __APPLE__ is never defined, so an
+__APPLE__ guard compiles the mirror out entirely and the patch silently does
+nothing (measured: the first build of this patch produced a kernelbase.dll with
+no %gs store in it). On hosts where %gs maps to the TEB the store writes the
+same address as the C assignment above it, so leaving it unconditional is
+correct there too.
+
+NOT VERIFIED: that this patch makes Guardians run. It fixes the defect above,
+which is measured, but whether that defect is the only thing stopping the game
+is untested. Note also that CodeWeavers' own testers report this game running
+on M1 Max and M1 Ultra with D3DMetal on CrossOver 24.0 and 25.0.1, built from
+this same tree, which this patch does not explain.
+
+UPSTREAM: not yet reported.
+
+Keep the mirror in step in the three places kernelbase changes the field
+(ConvertFiberToThread, ConvertThreadToFiberEx, SwitchToFiber).
+
+---
+--- a/dlls/kernelbase/thread.c
++++ b/dlls/kernelbase/thread.c
+@@ -1142,6 +1142,26 @@
+     fiber->actctx.stack_ptr = &fiber->actctx.stack_space;
+     init_fiber_context( fiber );
+     return fiber;
++}
++
++
++/* On macOS the %gs base is the host thread block, not the TEB, so signal_init_process()
++ * mirrors individual TEB fields into it. Tib.FiberData was never mirrored, but
++ * GetCurrentFiber() is an intrinsic that reads %gs:0x20 directly and cannot be intercepted,
++ * so a game's job system reads a host value and hands it back to SwitchToFiber, which
++ * dereferences it (Marvel's Guardians of the Galaxy: read of 0x907, i.e. 0x8ff + 8).
++ * Keep the mirror in step wherever Tib.FiberData changes.
++ *
++ * On macOS this slot holds the thread's pthread QoS class, which is lost for threads that
++ * use fibers. Windows and macOS both fix the offset, so the two cannot coexist. Not guarded
++ * on __APPLE__: this file is built for PE by mingw, where that macro is never defined. Where
++ * %gs maps to the TEB the store writes the same address as the assignment above it. */
++static inline void set_teb_fiber_data( void *fiber )
++{
++    NtCurrentTeb()->Tib.FiberData = fiber;
++#ifdef __x86_64__
++    __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (fiber), "n" (FIELD_OFFSET(TEB, Tib.FiberData)));
++#endif
+ }
+ 
+ 
+@@ -1155,7 +1175,7 @@
+     if (fiber)
+     {
+         relocate_thread_actctx_stack( &NtCurrentTeb()->ActivationContextStack );
+-        NtCurrentTeb()->Tib.FiberData = NULL;
++        set_teb_fiber_data( NULL );
+         HeapFree( GetProcessHeap(), 0, fiber );
+     }
+     return TRUE;
+@@ -1217,7 +1237,7 @@
+     fiber->flags            = flags;
+     fiber->fls_slots        = NtCurrentTeb()->FlsSlots;
+     relocate_thread_actctx_stack( &fiber->actctx.stack_space );
+-    NtCurrentTeb()->Tib.FiberData = fiber;
++    set_teb_fiber_data( fiber );
+     return fiber;
+ }
+ 
+@@ -1267,7 +1287,7 @@
+     /* stack_allocation and stack_base never change */
+ 
+     /* FIXME: should save floating point context if requested in fiber->flags */
+-    NtCurrentTeb()->Tib.FiberData     = new_fiber;
++    set_teb_fiber_data( new_fiber );
+     NtCurrentTeb()->Tib.ExceptionList = new_fiber->except;
+     NtCurrentTeb()->Tib.StackBase     = new_fiber->stack_base;
+     NtCurrentTeb()->Tib.StackLimit    = new_fiber->stack_limit;

@@ -1,0 +1,34 @@
+# Applied in this order on top of the CrossOver 26.3.0 sources (sources/wine) by
+# scripts/prepare-wine-src.sh. Paths are relative to patches/.
+#
+# Highball engine series (LGPL-2.1, https://github.com/gauthierpiarrette/highball-engine).
+# Left out: 0001 (renames the Windows user; NotProton's run script expects "crossover"),
+# 0007 (cross-process CEF swapchains for the Windows Steam client, not run here) and
+# 0013 (held back by Highball itself).
+highball/0002-wined3d-auto-renderer-opengl-first.patch
+highball/0003-ntdll-winedllpath-prepend.patch
+highball/0005-ntdll-yield-after-auto-event-set.patch
+highball/0006-kernelbase-per-exe-command-line-append.patch
+highball/0008-macos-mirror-teb-fiberdata.patch
+highball/0009-macos-swap-fiberdata-and-qos-slot.patch
+highball/0010-mfreadwrite-video-processor-sample-allocator.patch
+highball/0011-macos-lasterror-in-gs-slot.patch
+highball/0012-ntdll-x87sidecar-cooperative-attach.patch
+highball/0014-msync-unregister-early-return.patch
+highball/0015-winecoreaudio-io-buffer-under-half-a-period.patch
+highball/0016-macos-lasterror-callback-return-once.patch
+highball/0017-kernelbase-getintegrateddisplaysize-stub.patch
+highball/0018-macos-commit-charge-is-the-footprint.patch
+highball/0019-advapi32-credenumerate-empty-keychain-is-not-an-error.patch
+highball/0020-winemac-retina-horzres-not-doubled.patch
+highball/0021-opengl32-es2-compat-calls-in-legacy-contexts.patch
+#
+# Valve's Proton Wine (ValveSoftware/wine, proton_11.0), applied unchanged.
+valve/0ea9dfd798.patch
+valve/e847516750.patch
+valve/eeb10d71be.patch
+#
+# Ours. 0001 ports Valve's ntdll steamclient -> lsteamclient series (valve/ported/) onto
+# this tree; 0002 registers dlls/lsteamclient with the build.
+local/0001-steam-ntdll-route-steamclient-64-.dll-into-builtin-l.patch
+local/0002-build-register-dlls-lsteamclient-let-makedep-see-pra.patch

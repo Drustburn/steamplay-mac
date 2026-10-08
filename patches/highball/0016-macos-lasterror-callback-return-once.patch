@@ -1,0 +1,34 @@
+macOS: the user-mode callback return no longer writes LastErrorValue back a second time.
+
+Patch 0011 writes PE's %gs:0x68 back into TEB->LastErrorValue at every entry into unix code, and it
+did so in user_mode_callback_return too. That function is only ever reached through NtCallbackReturn,
+a system call, so the syscall dispatcher's entry had already written PE's value to the TEB and put
+libc's slot 13 back into %gs:0x68. The second write-back then copied libc's slot, a heap pointer,
+into the TEB, and the next return to PE code handed that pointer to GetLastError().
+
+Every window procedure and driver-load callback goes through that return, so the first display
+call of a process poisoned LastError: lasterr3.exe on x64-crossover26.3-r12 and r13 (M4, macOS
+27.0) reads GetLastError() = 60687104 after GetSystemMetrics(SM_CXSCREEN) and again after
+CreateWindowExW, the same value both times, the thread's slot 13. r7, before 0011, reads 0. The
+Rockstar Games Launcher installer checks GetLastError() right after it calculates the display DPI
+and stops with "An error has occurred. Please make sure all instances of the Rockstar Games Launcher
+have been closed" (its log: "Last error: 22725120 (0x15ac200): (unknown error)"), on both Steam's
+first-run install of Red Dead Redemption 2 and Highball's own launcher recipe (highball-db#272,
+2026-10-02). The QoS slot restore 0009 placed in the same function is idempotent and stays.
+
+The host restore of slot 13 is dropped along with the write-back: %gs:0x68 already holds libc's
+value there, for the same reason.
+
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -1853,10 +1853,6 @@
+                                                          NTSTATUS status, TEB *teb );
+ __ASM_GLOBAL_FUNC( user_mode_callback_return,
+ #ifdef __APPLE__
+-                   "movl %gs:0x68,%r10d\n\t"       /* PE's LastErrorValue back into the TEB */
+-                   "movl %r10d,0x68(%rcx)\n\t"
+-                   "movq 0x348(%rcx),%r10\n\t"     /* host slot 13 back: unix code owns %gs:0x68 again */
+-                   "movq %r10,%gs:0x68\n\t"
+                    "movq 0x340(%rcx),%r10\n\t" /* amd64_thread_data()->host_qos: unix code owns %gs:0x20 again */
+                    "movq %r10,%gs:0x20\n\t"
+ #endif

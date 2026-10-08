@@ -1,0 +1,36 @@
+From 0ea9dfd7984876edadc73db535f05e049ac25046 Mon Sep 17 00:00:00 2001
+From: Andrew Eikum <aeikum@codeweavers.com>
+Date: Thu, 27 Apr 2017 13:25:04 -0500
+Subject: [PATCH] HACK: steam: kernelbase: Substitute the current pid for the
+ Steam client pid.
+
+---
+ dlls/kernelbase/process.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index 3656e40280d8..9d3edc93da95 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -1102,6 +1102,21 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenProcess( DWORD access, BOOL inherit, DWORD i
+ 
+     InitializeObjectAttributes( &attr, NULL, inherit ? OBJ_INHERIT : 0, 0, NULL );
+ 
++    /* PROTON HACK:
++     * On Windows, the Steam client puts its process ID into the registry
++     * at:
++     *
++     *   [HKCU\Software\Valve\Steam\ActiveProcess]
++     *   PID=dword:00000008
++     *
++     * Games get that pid from the registry and then query it with
++     * OpenProcess to ensure Steam is running. Since we aren't running the
++     * Windows Steam in Wine, instead we hack this magic number into the
++     * registry and then substitute the game's process itself in its place
++     * so it can query a valid process.
++     */
++    if (id == 0xfffe) id = GetCurrentProcessId();
++
+     cid.UniqueProcess = ULongToHandle(id);
+     cid.UniqueThread  = 0;
+ 

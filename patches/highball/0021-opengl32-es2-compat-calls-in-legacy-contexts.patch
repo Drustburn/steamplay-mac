@@ -1,0 +1,100 @@
+opengl32: GL_ARB_ES2_compatibility's calls answer in legacy contexts.
+
+macOS gives a program that creates an OpenGL context without attributes a legacy 2.1 context,
+and lists GL_ARB_ES2_compatibility only in its 4.1 core contexts. opengl32 then withholds the
+extension's calls and returns no function. Programs written against OpenGL ES 2 load them anyway,
+since every Windows driver offers them in any context, and call the empty pointer.
+
+Measured on an M4 (macOS 27.0, 2026-10-06): Paperback: The Game (Steam 710700, Loom engine, SDL
+and OpenGL) crashes at address 0 a second after start, both its 32-bit and 64-bit builds, on every
+graphics mode. WINEDEBUG=warn+opengl shows "Extension GL_ARB_ES2_compatibility GL_VERSION_4_1
+required for glClearDepthf not supported" as the last line before the fault (highball-db#349).
+With glClearDepthf and glDepthRangef answered it got as far as glGetShaderPrecisionFormat, then
+glShaderBinary: its loader crashes on the first call it cannot get, so all five have to answer.
+
+When the extension is missing, glClearDepthf and glDepthRangef now go through glClearDepth and
+glDepthRange, glGetShaderPrecisionFormat answers what desktop drivers answer (single precision
+floats, 32-bit integers), and glReleaseShaderCompiler and glShaderBinary do nothing (no binary
+formats are listed without the extension). A context that has the
+extension is unchanged.
+
+--- a/dlls/opengl32/unix_wgl.c	2026-10-06 17:04:52
++++ b/dlls/opengl32/unix_wgl.c	2026-10-06 17:46:26
+@@ -959,8 +959,53 @@
+ {
+     const struct registry_entry *entry_a = a, *entry_b = b;
+     return strcmp( entry_a->name, entry_b->name );
++}
++
++/* GL_ARB_ES2_compatibility's calls. macOS lists that extension only in 4.1 core contexts, but
++ * programs written against OpenGL ES 2 call these in a legacy (2.1) context too, which every
++ * Windows driver allows. The depth calls go through the double precision core ones. */
++static void compat_glClearDepthf( GLfloat d )
++{
++    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
++    funcs->p_glClearDepth( d );
++}
++
++static void compat_glDepthRangef( GLfloat n, GLfloat f )
++{
++    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
++    funcs->p_glDepthRange( n, f );
+ }
+ 
++/* What desktop drivers answer: IEEE single precision floats and 32-bit integers. */
++static void compat_glGetShaderPrecisionFormat( GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision )
++{
++    switch (precisiontype)
++    {
++    case GL_LOW_FLOAT:
++    case GL_MEDIUM_FLOAT:
++    case GL_HIGH_FLOAT:
++        range[0] = range[1] = 127;
++        *precision = 23;
++        break;
++    case GL_LOW_INT:
++    case GL_MEDIUM_INT:
++    case GL_HIGH_INT:
++        range[0] = 31;
++        range[1] = 30;
++        *precision = 0;
++        break;
++    }
++}
++
++static void compat_glReleaseShaderCompiler(void)
++{
++}
++
++/* No binary formats are listed without the extension, so there is nothing to load. */
++static void compat_glShaderBinary( GLsizei count, const GLuint *shaders, GLenum binaryformat, const void *binary, GLsizei length )
++{
++}
++
+ PROC wrap_wglGetProcAddress( TEB *teb, LPCSTR name )
+ {
+     const struct registry_entry entry = {.name = name}, *found;
+@@ -996,7 +1041,23 @@
+                 { "glCopyTexSubImage3DEXT", "glCopyTexSubImage3D" },     /* needed by RuneScape */
+                 { "glVertexAttribDivisor", "glVertexAttribDivisorARB"},  /* needed by Caffeine */
+                 { "glCompressedTexImage2DARB", "glCompressedTexImage2D" }, /* needed by Grim Fandango Remastered */
++            };
++            static const struct { const char *name; const void *func; } emulated[] =
++            {
++                { "glClearDepthf", compat_glClearDepthf },  /* needed by Paperback: The Game (Loom) */
++                { "glDepthRangef", compat_glDepthRangef },
++                { "glGetShaderPrecisionFormat", compat_glGetShaderPrecisionFormat },
++                { "glReleaseShaderCompiler", compat_glReleaseShaderCompiler },
++                { "glShaderBinary", compat_glShaderBinary },
+             };
++
++            for (i = 0; i < ARRAY_SIZE(emulated); i++)
++            {
++                if (strcmp( name, emulated[i].name )) continue;
++                WARN( "Extension %s required for %s not supported, emulating it\n", found->extension, name );
++                *func_ptr = emulated[i].func;
++                return (void *)(UINT_PTR)(found - extension_registry);
++            }
+ 
+             for (i = 0; i < ARRAY_SIZE(alternatives); i++)
+             {

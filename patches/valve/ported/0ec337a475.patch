@@ -1,0 +1,64 @@
+From 0ec337a4753535669ea9816ab870e8774bb11487 Mon Sep 17 00:00:00 2001
+From: Paul Gofman <pgofman@codeweavers.com>
+Date: Wed, 3 Jul 2024 19:30:46 -0600
+Subject: [PATCH] HACK: ntdll: Fixup OptionalHeader.ImageBase back in
+ steamclient.dll.
+
+CW-Bug-Id: #23139
+---
+ dlls/ntdll/loader.c | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index 5881d186a688..d3ea7cade116 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -2291,6 +2291,7 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+     SIZE_T map_size;
+     WCHAR *basename, *tmp;
+     ULONG basename_len;
++    BOOL is_steamclient32;
+ 
+     if (!(nt = RtlImageNtHeader( *module ))) return STATUS_INVALID_IMAGE_FORMAT;
+ 
+@@ -2318,7 +2319,7 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+     basename_len = wcslen(basename);
+     if (basename_len >= 4 && !wcscmp(basename + basename_len - 4, L".dll")) basename_len -= 4;
+ 
+-    if (use_lsteamclient() && (!RtlCompareUnicodeStrings(basename, basename_len, L"steamclient", 11, TRUE) ||
++    if (use_lsteamclient() && ((is_steamclient32 = !RtlCompareUnicodeStrings(basename, basename_len, L"steamclient", 11, TRUE)) ||
+          !RtlCompareUnicodeStrings(basename, basename_len, L"steamclient64", 13, TRUE) ||
+          !RtlCompareUnicodeStrings(basename, basename_len, L"gameoverlayrenderer", 19, TRUE) ||
+          !RtlCompareUnicodeStrings(basename, basename_len, L"gameoverlayrenderer64", 21, TRUE)) &&
+@@ -2330,6 +2331,31 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+         wm->ldr.Flags |= LDR_DONT_RESOLVE_REFS;
+         flags |= DONT_RESOLVE_DLL_REFERENCES;
+         NtFlushInstructionCache( NtCurrentProcess(), *module, map_size );
++        if (is_steamclient32)
++        {
++            OBJECT_ATTRIBUTES attr;
++            void *addr = *module;
++            SIZE_T size = 0x1000;
++            LARGE_INTEGER offset;
++            IO_STATUS_BLOCK io;
++            DWORD protect_old;
++            HANDLE file;
++
++            NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_READWRITE, &protect_old );
++            memset( &attr, 0, sizeof(attr) );
++            attr.Length = sizeof(attr);
++            attr.Attributes = OBJ_CASE_INSENSITIVE;
++            attr.ObjectName = (UNICODE_STRING *)nt_name;
++            NtOpenFile( &file, GENERIC_READ | SYNCHRONIZE, &attr, &io,
++                        FILE_SHARE_READ | FILE_SHARE_DELETE,
++                        FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE );
++            offset.QuadPart = (ULONG_PTR)&nt->OptionalHeader.ImageBase - (ULONG_PTR)addr;
++            NtReadFile( file, 0, NULL, NULL, &io, &nt->OptionalHeader.ImageBase,
++                        sizeof(nt->OptionalHeader.ImageBase), &offset, NULL );
++            NtClose( file );
++            TRACE( "steamclient ImageBase %#Ix.\n", nt->OptionalHeader.ImageBase );
++            NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, protect_old, &protect_old );
++        }
+     }
+ 
+     /* fixup imports */

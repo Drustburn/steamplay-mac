@@ -1,0 +1,33 @@
+Automatic wined3d renderer: OpenGL first, as upstream Wine, instead of CrossOver's Vulkan-first hack 18311.
+
+With MoltenVK present the Vulkan adapter is created and then fails the Direct3D 11 feature
+checks: Warframe's 32-bit launcher reported "Checking for D3D11 support on adapter 0 failed
+(0x80004005)" and refused to run, and Rockstar's launcher failed to initialize, both on
+engine builds without this patch (2026-09-04, M1 Pro, macOS 26.6.2). Sikarugir's Wine 10
+engine, on which the same launchers run, takes OpenGL here. An explicit renderer=vulkan in
+WINE_D3D_CONFIG or the registry still selects Vulkan.
+Upstream status: CrossOver-only hack; upstream already behaves this way.
+
+--- a/dlls/wined3d/directx.c	2026-09-04 06:32:27
++++ b/dlls/wined3d/directx.c	2026-09-04 06:32:27
+@@ -3527,13 +3527,14 @@
+ 
+     if (wined3d_settings.renderer == WINED3D_RENDERER_OPENGL)
+         return wined3d_adapter_gl_create(ordinal, wined3d_creation_flags);
+-
+-    /* CW HACK 18311: Use the Vulkan renderer on macOS. */
+-    if ((adapter = wined3d_adapter_vk_create(ordinal, wined3d_creation_flags)))
+-        ERR_(winediag)("Using the Vulkan renderer for d3d10/11 applications.\n");
+ 
+-    if (!adapter)
+-        adapter = wined3d_adapter_gl_create(ordinal, wined3d_creation_flags);
++    /* Highball: upstream's choice for the automatic renderer, OpenGL, instead of CrossOver's
++     * Vulkan-first hack 18311. On MoltenVK the Vulkan adapter is created and then fails the
++     * Direct3D 11 feature checks, which took 32-bit launchers (Warframe's) and Rockstar's
++     * launcher down; Sikarugir's engines behave as upstream here. renderer=vulkan in
++     * WINE_D3D_CONFIG or the registry still selects it explicitly. */
++    if (!(adapter = wined3d_adapter_gl_create(ordinal, wined3d_creation_flags)))
++        adapter = wined3d_adapter_vk_create(ordinal, wined3d_creation_flags);
+ 
+     return adapter;
+ }

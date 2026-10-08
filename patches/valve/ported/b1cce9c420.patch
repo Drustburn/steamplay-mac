@@ -1,0 +1,80 @@
+From b1cce9c4204d125d42d03b96dba89bb0ad566d24 Mon Sep 17 00:00:00 2001
+From: Arkadiusz Hiler <ahiler@codeweavers.com>
+Date: Mon, 7 Jul 2025 10:22:16 +0300
+Subject: [PATCH] ntdll: Fully resolve 64bit native steamclient dependencies
+ without calling DllMain().
+
+The partial import fixup performed by
+
+    fixup_imports( wm, load_path );
+    wm->ldr.Flags |= LDR_DONT_RESOLVE_REFS;
+
+resulted in all the imports being loded but without continuing the
+"resolve" later on - DllMain() of those DLLs was not called.
+
+This could result in things like secur32 being loded but none of the
+providers are initialized if steamclient loads that DLL first.
+
+Fixes: 40af052fe02c ("ntdll: HACK: Partially fixup imports for Win Steam libs."
+CW-Bug-Id: #24174
+CW-Bug-Id: #25106
+CW-Bug-Id: #25635
+---
+ dlls/ntdll/loader.c | 10 +++++-----
+ include/winternl.h  |  1 +
+ 2 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index 6359934d154c..7db426b5c8fc 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -1725,7 +1725,7 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved
+ 
+     /* Skip calls for modules loaded with special load flags */
+ 
+-    if (wm->ldr.Flags & LDR_DONT_RESOLVE_REFS) return STATUS_SUCCESS;
++    if (wm->ldr.Flags & (LDR_DONT_RESOLVE_REFS | LDR_DONT_CALL_DLLMAIN)) return STATUS_SUCCESS;
+     if (wm->ldr.TlsIndex == -1) call_tls_callbacks( wm->ldr.DllBase, reason );
+     if (!entry) return STATUS_SUCCESS;
+ 
+@@ -2338,8 +2338,6 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+     {
+         struct steamclient_setup_trampolines_params params = {.src_mod = *module, .tgt_mod = lsteamclient};
+         WINE_UNIX_CALL( unix_steamclient_setup_trampolines, &params );
+-        wm->ldr.Flags |= LDR_DONT_RESOLVE_REFS;
+-        flags |= DONT_RESOLVE_DLL_REFERENCES;
+         NtFlushInstructionCache( NtCurrentProcess(), *module, map_size );
+         if (is_steamclient32)
+         {
+@@ -2351,6 +2349,9 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+             DWORD protect_old;
+             HANDLE file;
+ 
++            wm->ldr.Flags |= LDR_DONT_RESOLVE_REFS;
++            flags |= LDR_DONT_RESOLVE_REFS;
++
+             NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_READWRITE, &protect_old );
+             memset( &attr, 0, sizeof(attr) );
+             attr.Length = sizeof(attr);
+@@ -2368,8 +2369,7 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+         }
+         else
+         {
+-            fixup_imports( wm, load_path );
+-            wm->ldr.Flags |= LDR_DONT_RESOLVE_REFS;
++            wm->ldr.Flags |= LDR_DONT_CALL_DLLMAIN;
+         }
+     }
+ 
+diff --git a/include/winternl.h b/include/winternl.h
+index 4eb85778d9f7..afbdf2028796 100644
+--- a/include/winternl.h
++++ b/include/winternl.h
+@@ -4005,6 +4005,7 @@ typedef void (CALLBACK *PLDR_DLL_NOTIFICATION_FUNCTION)(ULONG, LDR_DLL_NOTIFICAT
+ /* these ones is Wine specific */
+ #define LDR_DONT_RESOLVE_REFS           0x40000000
+ #define LDR_WINE_INTERNAL               0x80000000
++#define LDR_DONT_CALL_DLLMAIN           0x20000000
+ 
+ /* flag for LdrAddRefDll */
+ #define LDR_ADDREF_DLL_PIN              0x00000001

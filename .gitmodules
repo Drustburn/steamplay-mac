@@ -1,0 +1,4 @@
+[submodule "notproton"]
+	path = notproton
+	url = https://github.com/Drustburn/NotProton.git
+	branch = selfbuilt-wine

@@ -1,0 +1,168 @@
+macOS: swap %gs:0x20 between Tib.FiberData and the pthread QoS slot at every crossing.
+
+Patch 0008 mirrors Tib.FiberData into %gs:0x20 so that GetCurrentFiber(), a
+compiler intrinsic that reads that slot directly, returns the real fiber. It
+documented the cost: on macOS that slot is the thread's pthread QoS class, read
+by libdispatch and pthread, and the mirror clobbers it for any thread that uses
+fibers.
+
+MEASURED (M1 Pro, macOS 26.6.2, 2026-09-12, Metaphor: ReFantazio Prologue Demo,
+Steam 3130330):
+
+  * On the engine without 0008 (Sikarugir Wine 10, r0 to r2) the game faults
+    seconds after launch reading 0x20FF, the QoS value for the thread it just
+    created fibers on, right after CreateFiber and SwitchToFiber in the relay
+    trace. Same with AVX advertised and on DXVK, so only the fiber slot is
+    involved. This is the Guardians of the Galaxy defect 0008 fixes.
+  * On the engine with 0008 (Wine 11, r5 to r7) the game gets a window, then
+    the process hangs at full CPU with the window black. A `sample` of the
+    process shows the Cocoa main thread inside Wine's signal handler after a
+    fault in libdispatch's _dispatch_set_priority_and_voucher_slow, and three
+    worker threads more than a thousand frames deep in nested exception
+    dispatch. The game's job threads switch fibers and also drive winemac.drv,
+    so blocks reach the main queue carrying a fiber pointer where libdispatch
+    expects a priority, and the main queue faults on it. Guardians never takes
+    that path.
+
+Windows and macOS both fix the offset, so the two values cannot share the slot;
+they can take turns. This patch gives the slot to whichever side is running:
+
+  * signal_init_thread keeps the host QoS value in a new
+    amd64_thread_data field (host_qos, TEB+0x340) before anything else runs.
+  * Every entry into unix code writes host_qos back into %gs:0x20: the syscall
+    dispatcher, the unix-call dispatcher, and user_mode_callback_return.
+  * Every return to PE code writes Tib.FiberData into %gs:0x20:
+    __wine_syscall_dispatcher_return (which also covers thread start, APC and
+    exception delivery, since they all leave through it), the unix-call
+    dispatcher's own fast return (it does not pass through the label above
+    unless restore_flags is set), and call_user_mode_callback (window
+    procedures and other callbacks).
+
+Register choice matters in the unix-call dispatcher: its fast return restores
+only %r13, %rsi and %rdi and relies on the SysV callee-saved registers for the
+rest, so the swap there uses %rax on entry (dead until the call) and %rdx on
+return (volatile for the PE caller). The first build of this patch used %r15
+on entry and every process died at the first unix call after it, in
+build_module, reading through the clobbered %r15 (measured, 2026-09-12).
+  * The three kernelbase sites from 0008 keep writing the slot while PE code
+    owns it; TEB->Tib.FiberData stays the source of truth.
+
+Threads that never run PE code (the Cocoa main thread, libdispatch workers)
+keep their QoS value untouched, because nothing writes the slot on them any
+more: 0008 never wrote it at thread start, and this patch only reads it there.
+
+COST: two moves per crossing on macOS, none elsewhere. Unix code running inside
+a signal handler on a PE thread still sees the fiber pointer in the slot; Wine's
+handlers do not call libdispatch, so this is accepted.
+
+NOT VERIFIED at the time of writing: that Metaphor plays with this patch, and
+that Guardians still does. Both are the tests for the engine built from it.
+
+UPSTREAM: nothing to send, and the earlier sentence here claiming upstream Wine
+has the same conflict was wrong. Upstream solved the whole class in Wine 10.5
+(Brendan Shanks, 3a16aabbf5, "ntdll: On macOS x86_64, swap GSBASE between the
+TEB and macOS TSD when entering/leaving PE code"): the dispatchers switch the
+entire gs base with the private _thread_set_tsd_base syscall, so PE code sees
+the real TEB (including Tib.FiberData at 0x20) and unix code sees the pthread
+block. Wine 10.0 to 10.4 and the CrossOver 26.3 source tree this engine is
+built from do not carry that change (measured: zero references in either).
+This patch is the one-slot alternative for such trees, two moves per crossing
+instead of a syscall. The better long-term fix for this engine is to backport
+the upstream gs base switch.
+
+--- a/dlls/ntdll/unix/signal_x86_64.c	2026-09-12 19:10:21
++++ b/dlls/ntdll/unix/signal_x86_64.c	2026-09-12 19:37:50
+@@ -508,11 +508,13 @@
+     void                **instrumentation_callback; /* 0330 */
+     DWORD                 fs;            /* 0338 WOW TEB selector */
+     DWORD                 mxcsr;         /* 033c Unix-side mxcsr register */
++    DWORD_PTR             host_qos;      /* 0340 macOS: the pthread QoS slot value, %gs:0x20, while PE code owns that slot */
+ };
+ 
+ C_ASSERT( sizeof(struct amd64_thread_data) <= sizeof(((struct ntdll_thread_data *)0)->cpu_data) );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, pthread_teb ) == 0x320 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, frame_size ) == 0x328 );
++C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, host_qos ) == 0x340 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, instrumentation_callback ) == 0x330 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, fs ) == 0x338 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, mxcsr ) == 0x33c );
+@@ -1825,6 +1827,10 @@
+                    "jz 1f\n\t"
+                    "xchgq %rcx,%r10\n"
+                    "1:\n\t"
++#ifdef __APPLE__
++                   "movq 0x20(%r13),%rax\n\t"      /* teb->Tib.FiberData: PE code owns %gs:0x20 from here */
++                   "movq %rax,%gs:0x20\n\t"
++#endif
+                    "xor %rbx,%rbx\n\t"
+                    "xor %r12,%r12\n\t"
+                    "xor %r13,%r13\n\t"
+@@ -1839,6 +1845,10 @@
+ extern void DECLSPEC_NORETURN user_mode_callback_return( void *ret_ptr, ULONG ret_len,
+                                                          NTSTATUS status, TEB *teb );
+ __ASM_GLOBAL_FUNC( user_mode_callback_return,
++#ifdef __APPLE__
++                   "movq 0x340(%rcx),%r10\n\t" /* amd64_thread_data()->host_qos: unix code owns %gs:0x20 again */
++                   "movq %r10,%gs:0x20\n\t"
++#endif
+                    "movq 0x378(%rcx),%r10\n\t" /* thread_data->syscall_frame */
+                    "movq 0xa0(%r10),%r11\n\t"  /* frame->prev_frame */
+                    "movq %r11,0x378(%rcx)\n\t" /* syscall_frame = prev_frame */
+@@ -3076,6 +3086,12 @@
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
++    /* %gs:0x20 is where PE code reads Tib.FiberData (GetCurrentFiber() is an intrinsic), and on
++     * macOS it is the pthread QoS class slot that libdispatch and pthread read. Both cannot hold
++     * the slot at once, so it is swapped at every crossing: unix code gets the host value back
++     * on entry (the dispatchers, user_mode_callback_return), PE code gets Tib.FiberData on
++     * return (__wine_syscall_dispatcher_return, call_user_mode_callback). Keep the host value. */
++    __asm__ volatile ("movq %%gs:%c1,%0" : "=r" (thread_data->host_qos) : "n" (FIELD_OFFSET(TEB, Tib.FiberData)));
+     thread_data->pthread_teb = mac_thread_gsbase();
+     /* alloc_tls_slot() needs to poke a value to an address relative to each
+        thread's gsbase.  Have each thread record its gsbase pointer into its
+@@ -3227,6 +3243,10 @@
+                    __ASM_CFI_REG_IS_AT2(rbp, rcx, 0x98, 0x01)
+                    "movq %gs:0x30,%r13\n\t"        /* teb */
+                    "movl %eax,0xb0(%rcx)\n\t"      /* frame->syscall_id */
++#ifdef __APPLE__
++                   "movq 0x340(%r13),%r15\n\t"     /* amd64_thread_data()->host_qos */
++                   "movq %r15,%gs:0x20\n\t"        /* unix code sees the pthread QoS slot again */
++#endif
+                    /* Legends of Runeterra hooks the first system call return instruction, and
+                     * depends on us returning to it. Adjust the return address accordingly. */
+                    "subq $0xb,0x70(%rcx)\n\t"
+@@ -3335,6 +3355,11 @@
+                    __ASM_CFI(".cfi_remember_state\n\t")
+                    __ASM_CFI_CFA_IS_AT2(rcx, 0xa8, 0x01) /* frame->syscall_cfa */
+                    "leaq 0x70(%rcx),%rsp\n\t"      /* %rsp > frame means no longer inside syscall */
++#ifdef __APPLE__
++                   "movq %gs:0x30,%r15\n\t"        /* teb */
++                   "movq 0x20(%r15),%r15\n\t"      /* teb->Tib.FiberData */
++                   "movq %r15,%gs:0x20\n\t"        /* PE code reads GetCurrentFiber() here; %r15 is restored below */
++#endif
+ #ifdef __linux__
+                    "movw 0x338(%r13),%dx\n"        /* amd64_thread_data()->fs */
+                    "testw %dx,%dx\n\t"
+@@ -3546,6 +3571,10 @@
+                    "movq %rbp,0x98(%rcx)\n\t"
+                    __ASM_CFI_REG_IS_AT2(rbp, rcx, 0x98, 0x01)
+                    "movq %gs:0x30,%r13\n\t"
++#ifdef __APPLE__
++                   "movq 0x340(%r13),%rax\n\t"     /* amd64_thread_data()->host_qos; %rax is dead until the call below */
++                   "movq %rax,%gs:0x20\n\t"        /* unix code sees the pthread QoS slot again */
++#endif
+                    "stmxcsr 0xd8(%rcx)\n\t"        /* frame->xsave.MxCsr */
+                    "movdqa %xmm6,0x1c0(%rcx)\n\t"
+                    "movdqa %xmm7,0x1d0(%rcx)\n\t"
+@@ -3611,6 +3640,10 @@
+                    "movw %dx,%fs\n"
+                    "1:\n\t"
+ #endif
++#ifdef __APPLE__
++                   "movq 0x20(%r13),%rdx\n\t"      /* teb->Tib.FiberData: PE code owns %gs:0x20 again (%rdx is volatile for the PE caller) */
++                   "movq %rdx,%gs:0x20\n\t"
++#endif
+                    "movq 0x58(%rcx),%r13\n\t"
+                    "movq 0x28(%rcx),%rdi\n\t"
+                    "movq 0x20(%rcx),%rsi\n\t"
