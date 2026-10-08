@@ -58,6 +58,8 @@ step "NotProton fork: Dobby, notproton.dylib, overlay shim, helpers"
 run notproton make -C "$ROOT/notproton" out/notproton.dylib overlay-shim iconmaker appinfo
 mkdir -p "$ROOT/build/helpers"
 clang -O2 -mmacosx-version-min=14.0 -o "$ROOT/build/helpers/pe-d3d" "$ROOT/notproton/helpers/pe-d3d.c"
+swiftc -O -target arm64-apple-macos14.0 -framework AppKit -framework IOKit \
+    -o "$ROOT/build/helpers/syshud" "$ROOT/notproton/helpers/syshud.swift"
 
 step "assembling runner $ID (Mono, Gecko, DXMT, D3DMetal)"
 run assemble "$ROOT/scripts/assemble-runner.sh" "$ID"

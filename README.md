@@ -88,9 +88,17 @@ scripts/install.sh steam          # inject the dylib into /Applications/Steam.ap
 scripts/install.sh block-updates  # optional, recommended (see Risks)
 ```
 
-`install.sh hud on` turns on Apple's Metal Performance HUD for every game. It sits small in the
-top-right corner and shows FPS and frame time. The defaults are `MTL_HUD_ALIGNMENT=topright`,
-`MTL_HUD_SCALE=0.1` and `MTL_HUD_ELEMENTS=fps,frameinterval`. You can override any
+`install.sh hud on` turns on a performance overlay for every game, in the top-right corner:
+
+- **Apple's Metal Performance HUD:** resolution, Metal and app memory, FPS with a graph, GPU
+  time, present delay and frame interval. The defaults are `MTL_HUD_ALIGNMENT=topright`,
+  `MTL_HUD_SCALE=0.12` and
+  `MTL_HUD_ELEMENTS=fps,frameinterval,gputime,presentdelay,layersize,memory,fpsgraph`.
+- **`syshud`, below it:** the values Metal cannot show, namely CPU and GPU load, RAM, thermal
+  state, the macOS version and build, the chip, the Wine runner and the graphics backend. It only
+  appears while the game is in front and ignores the mouse. `NOTPROTON_SYSHUD=0` turns it off.
+
+You can override any
 [HUD variable](https://developer.apple.com/documentation/xcode/customizing-metal-performance-hud)
 per game as a launch option, for example `MTL_HUD_ELEMENTS=fps,gputime,memory %command%`. Settings
 for all games go in `~/Library/Application Support/notproton/global.env`, one `KEY=VALUE` per line;

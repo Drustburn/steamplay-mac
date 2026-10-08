@@ -67,6 +67,7 @@ cmd_support() {
     install_file "$NP/out/iconmaker" "$SUP/iconmaker"
     install_file "$NP/out/appinfo" "$SUP/appinfo"
     install_file "$ROOT/build/helpers/pe-d3d" "$SUP/pe-d3d"
+    install_file "$ROOT/build/helpers/syshud" "$SUP/syshud"
     install_file "$NP/out/notproton.dylib" "$SUP/notproton.dylib"
     sed -n 's/.*NOTPROTON_VERSION[^"]*"\([^"]*\)".*/\1/p' "$NP/dylib/version.h" | head -1 > "$SUP/dylib.version"
     echo "helpers, signatures, dylib: $SUP"
