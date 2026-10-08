@@ -6,6 +6,7 @@
 #   install.sh support [runner-id]   runner, bridge, signatures, helpers (touches nothing of Steam)
 #   install.sh steam                 inject notproton.dylib into /Applications/Steam.app
 #   install.sh block-updates         stop the Steam bootstrapper from updating (and undoing) itself
+#   install.sh hud on|off            Apple's Metal HUD for every game (small, top right, FPS)
 #   install.sh uninstall-steam       restore Steam.app's Info.plist and remove the dylib
 #   install.sh status
 set -euo pipefail
@@ -109,6 +110,19 @@ cmd_block_updates() {
     echo "updates blocked via $cfg (delete that line to allow updates again)"
 }
 
+# global.env holds defaults for every game (a game's launch options still win).
+cmd_hud() {
+    local env="$SUP/global.env"
+    mkdir -p "$SUP"; touch "$env"
+    grep -v '^MTL_HUD_ENABLED=' "$env" > "$env.new" || true
+    case "${1:-}" in
+        on) echo 'MTL_HUD_ENABLED=1' >> "$env.new"; echo "Metal HUD on for all games (next launch)" ;;
+        off) echo "Metal HUD off" ;;
+        *) rm -f "$env.new"; die "usage: $0 hud on|off" ;;
+    esac
+    mv "$env.new" "$env"
+}
+
 cmd_uninstall_steam() {
     steam_running && die "quit Steam first"
     if [ -f "$BACKUP" ]; then
@@ -134,7 +148,8 @@ case "${1:-}" in
     support) shift; cmd_support "$@" ;;
     steam) cmd_steam ;;
     block-updates) cmd_block_updates ;;
+    hud) shift; cmd_hud "$@" ;;
     uninstall-steam) cmd_uninstall_steam ;;
     status) cmd_status ;;
-    *) sed -n '2,12p' "$0"; exit 2 ;;
+    *) sed -n '2,13p' "$0"; exit 2 ;;
 esac

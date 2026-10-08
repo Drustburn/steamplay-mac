@@ -42,8 +42,8 @@ macOS client's `steamclient.dylib`, so Steam features (overlay, achievements, cl
   - NC Guard initialises completely (`initialize:: done`).
   - The Steam overlay attaches.
   - The 3D title screen renders through D3DMetal (picked automatically).
-  - The game reaches server selection. Character creation could not be tested on launch day,
-    because the servers were full.
+  - The game reaches the global server list at a steady 60 fps (Metal HUD). Character creation
+    could not be tested on launch day, because the servers were full.
 
   CrossOver 26 and other Wine/GPTK setups hang at the splash screen.
 
@@ -87,6 +87,14 @@ scripts/install.sh support        # runner, bridge, helpers -> ~/Library/Applica
 scripts/install.sh steam          # inject the dylib into /Applications/Steam.app
 scripts/install.sh block-updates  # optional, recommended (see Risks)
 ```
+
+`install.sh hud on` turns on Apple's Metal Performance HUD for every game. It sits small in the
+top-right corner and shows FPS and frame time. The defaults are `MTL_HUD_ALIGNMENT=topright`,
+`MTL_HUD_SCALE=0.1` and `MTL_HUD_ELEMENTS=fps,frameinterval`. You can override any
+[HUD variable](https://developer.apple.com/documentation/xcode/customizing-metal-performance-hud)
+per game as a launch option, for example `MTL_HUD_ELEMENTS=fps,gputime,memory %command%`. Settings
+for all games go in `~/Library/Application Support/notproton/global.env`, one `KEY=VALUE` per line;
+a game's own launch options take precedence.
 
 `install.sh steam` needs your terminal to have permission to modify other apps. Enable it in
 **System Settings → Privacy & Security → App Management**.
