@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ID="${1:-selfbuilt-cx26.3-r1}"
+ID="${1:-selfbuilt-cx26.3-r2}"
 LOGS="$ROOT/build/logs"
 mkdir -p "$LOGS"
 
@@ -61,7 +61,7 @@ clang -O2 -mmacosx-version-min=14.0 -o "$ROOT/build/helpers/pe-d3d" "$ROOT/notpr
 swiftc -O -target arm64-apple-macos14.0 -framework AppKit -framework IOKit \
     -o "$ROOT/build/helpers/syshud" "$ROOT/notproton/helpers/syshud.swift"
 
-step "assembling runner $ID (Mono, Gecko, DXMT, D3DMetal)"
+step "assembling runner $ID (Mono, Gecko, DXMT, D3DMetal; D3DMetal 4 if its image is open)"
 run assemble "$ROOT/scripts/assemble-runner.sh" "$ID"
 
 printf '\nDone: %s\nNext: scripts/install.sh support && scripts/install.sh steam\n' "$ROOT/dist/runners/$ID"

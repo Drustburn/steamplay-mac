@@ -3,12 +3,14 @@
 # tier0_s64.dll, vstdlib_s64.dll, legacycompat/*) from Valve's CDN into build/bridge,
 # following notproton/app/.../valve-packages.manifest: every package zip and every file
 # taken out of it is checked against the manifest's sha256. Nothing of Valve's is committed.
+# STEAMPLAY_DOWNLOADS and STEAMPLAY_BRIDGE move the cache and the output (the DMG installer
+# runs from a read-only volume).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/notproton/app/Sources/NotProtonApp/Resources/valve-packages.manifest"
-CACHE="$ROOT/downloads/valve"
-OUT="$ROOT/build/bridge"
+CACHE="${STEAMPLAY_DOWNLOADS:-$ROOT/downloads}/valve"
+OUT="${STEAMPLAY_BRIDGE:-$ROOT/build/bridge}"
 mkdir -p "$CACHE" "$OUT"
 
 bases=$(awk '$1=="base"{print $2}' "$MANIFEST")

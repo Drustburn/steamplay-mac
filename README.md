@@ -22,7 +22,7 @@ a goal of that project, so this fork adds a runner you build from public sources
 | Steam bridge in ntdll | binary detours at offsets pinned per CrossOver build | Valve's Proton patches ported **into the source** |
 | Extra Wine fixes | – | [Highball](https://github.com/gauthierpiarrette/highball-engine) series: msync leak, Unity `GetLastError`, fibers, CoreAudio dropouts, Xbox sign-in, … |
 | Graphics backend | CrossOver's `CX_GRAPHICS_BACKEND` | own selection. *Auto* reads the game's PE imports: DX12 → D3DMetal, DX10/11 → DXMT, otherwise wined3d |
-| D3DMetal | CrossOver's copy | Apple Game Porting Toolkit 3.0 |
+| D3DMetal | CrossOver's copy | Apple Game Porting Toolkit 3.0; optionally 4.0 on macOS 27 ([below](#d3dmetal-4-macos-27)) |
 | DXMT | bundled with CrossOver | v0.80 |
 | msync | off by default | on by default |
 | Video (Media Foundation) | GStreamer | FFmpeg 7.1 through winedmo |
@@ -76,11 +76,36 @@ Every step can also be run on its own:
 | `build-steam-shim.sh` | NotProton's `steam.exe` shim, built in a stock wine-11.15 tree |
 | `fetch-valve-bridge.sh` | Valve's Windows Steam DLLs from Valve's CDN, sha256-checked |
 | `assemble-runner.sh` | runner tree with bundled libraries, Mono, Gecko, DXMT and D3DMetal |
+| `add-d3dmetal.sh` | D3DMetal 3 (and 4, see below) into a runner; used by `assemble-runner.sh` and `install.sh` |
+| `make-dmg.sh` | the installer disk image, see [Installer DMG](#installer-dmg) |
 
 Everything downloaded is checked against a pinned hash. Nothing from Valve or Apple is committed
 to this repository.
 
+### D3DMetal 4 (macOS 27)
+
+D3DMetal 4 comes with Apple's Game Porting Toolkit 4 and needs macOS 27. Apple distributes it
+only behind a free developer login, so the build does not download it:
+
+1. Download *Game Porting Toolkit 4* from
+   [developer.apple.com/download/all](https://developer.apple.com/download/all/?q=game%20porting%20toolkit).
+2. Open the disk image in Finder and accept the licence. If it contains another "Evaluation
+   environment" image, open that one too.
+3. Run `scripts/build-all.sh` (or only `scripts/assemble-runner.sh`). The script finds
+   `redist/lib` on the open volume, checks that D3DMetal is signed by Apple, and puts it next
+   to D3DMetal 3. `GPTK4=/path/to/folder` points it at a copied `redist/` instead.
+
+Pick **D3DMetal 4 (macOS 27)** in a game's *Properties → Compatibility*. You can also set
+`CX_GRAPHICS_BACKEND=d3dmetal4 %command%`. *Automatic* keeps using D3DMetal 3. On an older macOS,
+or in a runner built without it, the game falls back to D3DMetal 3, and `notproton-run.log` says
+so. Apple's Metal 4 renderer in the 4.0 beta ends some games after a minute, so it stays off.
+Turn on *Metal 4 renderer (beta)* (`D3DM_MTL4=1`) to try it.
+
 ## Install
+
+Without building, use the disk image: double-click **Install steamplay-mac** in it. The
+installer and its uninstaller are described under [Installer DMG](#installer-dmg). From a
+build:
 
 ```sh
 scripts/install.sh support        # runner, bridge, helpers -> ~/Library/Application Support/notproton
@@ -113,8 +138,31 @@ graphics backend (Automatic / D3DMetal / DXMT / WineD3D) and to toggle MetalFX/D
 HUD, AVX, msync and Retina mode. You can also set these as launch options, for example
 `CX_GRAPHICS_BACKEND=d3dmetal %command%`.
 
-To uninstall: `scripts/install.sh uninstall-steam`. To get Valve's original signature back,
-reinstall Steam.
+To uninstall: `scripts/install.sh uninstall-steam` restores Steam.app only.
+`scripts/install.sh uninstall` also removes the runner, the helpers and the update block. Game
+prefixes in `steamapps/compatdata` are kept. To get Valve's original signature back, reinstall
+Steam.
+
+### Installer DMG
+
+`scripts/make-dmg.sh` runs after `build-all.sh` and writes
+`dist/steamplay-mac-<date>-<commit>.dmg` (about 320 MB). The image holds:
+
+- **Install steamplay-mac:** an AppleScript applet, in English or German depending on the system
+  language. It checks for Apple silicon, macOS 14, Steam and Rosetta 2, and offers to install
+  Rosetta. It explains what will change, asks whether to block Steam updates, then runs
+  `install.sh support`, `steam` and `block-updates` with a progress window. When macOS refuses
+  to let it modify Steam.app, it opens *Privacy & Security → App Management* and retries.
+- **Uninstall steamplay-mac:** runs `install.sh uninstall`.
+- **Read me.txt** (English and German) with the source links, and **Licenses/**.
+
+The image contains nothing from Valve or Apple. The runner inside it has no D3DMetal, so
+`install.sh` downloads Valve's DLLs and D3DMetal on the user's Mac and checks them against the
+same pinned hashes as the build. That download is about 340 MB.
+
+The apps are only ad-hoc signed, not notarised. After downloading, macOS asks for *Open Anyway*
+in *Privacy & Security*. A checkout with uncommitted changes gets a `-dirty` version, because the
+source links in its Read me would point to code that does not match the binaries.
 
 ## Logs
 
@@ -147,6 +195,7 @@ patches/valve/        ValveSoftware/wine commits, applied as-is; ported/ holds t
 patches/local/        our patches (ntdll lsteamclient port, build registration)
 notproton/            submodule: Drustburn/NotProton, branch selfbuilt-wine
 scripts/              build and install scripts
+installer/            installer applet source and the DMG's Read me
 tests/d3dprobe.c      D3D11/D3D12 device probe
 ```
 

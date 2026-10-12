@@ -8,6 +8,8 @@
 #   lib/renderers/dxmt/             DXMT v0.80     (DX10/11 -> Metal)   WINEDLLPATH_PREPEND
 #   lib/renderers/d3dmetal/         Apple D3DMetal (DX11/12 -> Metal)   WINEDLLPATH_PREPEND
 #   lib/external/                   D3DMetal.framework + libd3dshared.dylib
+#   lib/renderers/d3dmetal4/        D3DMetal 4 (GPTK 4, macOS 27), optional, from an open GPTK 4 image
+#   lib/external/d3dmetal4/         its D3DMetal.framework + libd3dshared.dylib
 #   share/wine/{mono,gecko}/
 #   runner.json
 #
@@ -15,7 +17,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ID="${1:-selfbuilt-cx26.3-r1}"
+ID="${1:-selfbuilt-cx26.3-r2}"
 OUT="$ROOT/dist/runners/$ID"
 INSTALL="$ROOT/build/wine-install"
 BUILD="$ROOT/build/wine-x86_64"
@@ -84,29 +86,17 @@ cp "$dx/i386-windows/winemetal.dll" "$OUT/lib/wine/i386-windows/"
 cp "$dx/x86_64-unix/winemetal.so" "$OUT/lib/wine/x86_64-unix/"
 ln -s ../../../wine/x86_64-unix/winemetal.so "$R/x86_64-unix/winemetal.so"
 
-# --- D3DMetal from Game Porting Toolkit 3.0 (Apple licence: personal, non-commercial) ------
-# Gcenx's repack of Apple's GPTK 3.0 redistributable. Apple's licence allows non-commercial
-# redistribution on Apple hardware; it is fetched here and never committed.
-fetch https://github.com/Gcenx/game-porting-toolkit/releases/download/Game-Porting-Toolkit-3.0-3/game-porting-toolkit-3.0-3.tar.xz \
-    d377683937340f914823dbb2e1252b329cbf834ff58907d0293db8cebf0e392e game-porting-toolkit-3.0-3.tar.xz
-mkdir -p "$WORK/gptk"
-tar -xJf "$DL/game-porting-toolkit-3.0-3.tar.xz" -C "$WORK/gptk"
-g="$WORK/gptk/Game Porting Toolkit.app/Contents/Resources/wine/lib"
-mkdir -p "$OUT/lib/external"
-cp -R "$g/external/D3DMetal.framework" "$OUT/lib/external/"
-cp "$g/external/libd3dshared.dylib" "$OUT/lib/external/"
-R="$OUT/lib/renderers/d3dmetal"
-mkdir -p "$R/x86_64-windows" "$R/x86_64-unix"
-for d in d3d10 d3d11 d3d12 dxgi nvapi64 atidxx64; do
-    cp "$g/wine/x86_64-windows/$d.dll" "$R/x86_64-windows/$d.dll"
-    ln -s ../../../external/libd3dshared.dylib "$R/x86_64-unix/$d.so"
-done
-# DLSS -> MetalFX: the MetalFX NGX shim takes nvngx's place (as the MacPorts d3dmetal port does)
-cp "$g/wine/x86_64-windows/nvngx-on-metalfx.dll" "$R/x86_64-windows/nvngx.dll"
-ln -s ../../../external/libd3dshared.dylib "$R/x86_64-unix/nvngx.so"
-cp "$WORK/gptk/Game Porting Toolkit.app/Contents/Resources/License.rtf" "$OUT/lib/external/D3DMetal-License.rtf" 2>/dev/null || true
+# --- D3DMetal 3, and D3DMetal 4 if its image is open (Apple; see add-d3dmetal.sh) ---------
+STEAMPLAY_DOWNLOADS="$DL" "$ROOT/scripts/add-d3dmetal.sh" "$OUT"
 
 # --- manifest -------------------------------------------------------------------------------
+renderers='"dxmt": "v0.80", "d3dmetal": "3.0"'
+d3dm4_plist="$OUT/lib/external/d3dmetal4/D3DMetal.framework/Versions/A/Resources/Info.plist"
+if [ -f "$d3dm4_plist" ]; then
+    d3dm4_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$d3dm4_plist")"
+    d3dm4_min="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$d3dm4_plist" 2>/dev/null || true)"
+    renderers="$renderers, \"d3dmetal4\": \"$d3dm4_version\", \"d3dmetal4_min_macos\": \"$d3dm4_min\""
+fi
 wine_version="$("$OUT/bin/wine" --version 2>/dev/null || echo unknown)"
 cat > "$OUT/runner.json" <<EOF
 {
@@ -116,7 +106,7 @@ cat > "$OUT/runner.json" <<EOF
   "wine": "$wine_version",
   "base": "CrossOver 26.3.0 sources",
   "patches": "$(cd "$ROOT/src/wine" && git rev-parse --short HEAD)",
-  "renderers": { "dxmt": "v0.80", "d3dmetal": "3.0" },
+  "renderers": { $renderers },
   "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
