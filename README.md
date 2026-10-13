@@ -47,6 +47,9 @@ macOS client's `steamclient.dylib`, so Steam features (overlay, achievements, cl
 
   CrossOver 26 and other Wine/GPTK setups hang at the splash screen.
 
+  Since October 12 the game can hang here too. See
+  [AION 2 hangs at the splash screen](#aion-2-hangs-at-the-splash-screen).
+
 ## Requirements
 
 - An Apple Silicon Mac with macOS 14 or later (tested on macOS 26), Rosetta 2, and the Xcode
@@ -163,6 +166,40 @@ same pinned hashes as the build. That download is about 340 MB.
 The apps are only ad-hoc signed, not notarised. After downloading, macOS asks for *Open Anyway*
 in *Privacy & Security*. A checkout with uncommitted changes gets a `-dirty` version, because the
 source links in its Read me would point to code that does not match the binaries.
+
+## Known issues
+
+### AION 2 hangs at the splash screen
+
+AION 2 can stall after NC Guard logs `initialize:: done`, with `AION2.exe` at about 220 % CPU
+([#2](https://github.com/Drustburn/steamplay-mac/issues/2)). The cause is a 64→32-bit `CPUID`
+trampoline that Rosetta does not run. [aion2-wine-compat](https://github.com/Yuki-fox/aion2-wine-compat)
+provides a dylib that works around it. It does not change game files or NC Guard.
+
+The launch option in that project's README does not work with macOS Steam, which runs launch
+options without a shell. `$HOME` is not expanded, and the variable assignment becomes the program
+Steam tries to start. `~/Library/Application Support/Steam/logs/console_log.txt` then shows
+`Failed to spawn process` and `AppError_46`. Load the dylib through a wrapper script instead:
+
+```sh
+git clone https://github.com/Yuki-fox/aion2-wine-compat.git
+make -C aion2-wine-compat && make -C aion2-wine-compat test
+D="$HOME/Library/Application Support/notproton/aion2-compat"
+mkdir -p "$D" && cp aion2-wine-compat/build/compat_cpuid.dylib "$D/"
+cat > "$D/launch.sh" <<'EOF'
+#!/bin/sh
+export STEAM_DYLD_INSERT_LIBRARIES="$HOME/Library/Application Support/notproton/aion2-compat/compat_cpuid.dylib${STEAM_DYLD_INSERT_LIBRARIES:+:$STEAM_DYLD_INSERT_LIBRARIES}"
+exec "$@"
+EOF
+chmod +x "$D/launch.sh"
+echo "\"$D/launch.sh\" %command%"
+```
+
+Paste the printed line into AION 2's launch options, including the quotes and the absolute path.
+The fix is active when the `overlay injected from` line in `notproton-run.log` lists
+`compat_cpuid.dylib` first. While the wrapper is set, put other variables into `launch.sh`, not in front
+of it. The Compatibility page writes its options in front of the existing launch options, so
+toggling it would break the launch the same way.
 
 ## Logs
 
