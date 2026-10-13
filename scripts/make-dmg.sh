@@ -30,7 +30,7 @@ for f in pe-d3d syshud; do
     [ -x "$ROOT/build/helpers/$f" ] || die "build/helpers/$f missing (scripts/build-all.sh)"
 done
 # The run script is compiled into notproton.dylib, so bring the dylib up to date first.
-make -s -C "$NP" out/notproton.dylib overlay-shim iconmaker appinfo >/dev/null
+make -s -C "$NP" out/notproton.dylib overlay-shim aion2-compat iconmaker appinfo >/dev/null
 
 commit="$(git -C "$ROOT" rev-parse --short HEAD)"
 np_commit="$(git -C "$NP" rev-parse --short HEAD)"
@@ -67,7 +67,7 @@ ditto "$RUNNER" "$P/dist/runners/$ID"
 R="$P/dist/runners/$ID/lib"
 rm -rf "$R/external/D3DMetal.framework" "$R/external/libd3dshared.dylib" "$R/external/D3DMetal-License.rtf" \
     "$R/external/d3dmetal4" "$R/renderers/d3dmetal" "$R/renderers/d3dmetal4"
-for f in notproton.dylib overlay-shim.dylib iconmaker appinfo; do cp "$NP/out/$f" "$P/notproton/out/"; done
+for f in notproton.dylib overlay-shim.dylib compat_cpuid.dylib iconmaker appinfo; do cp "$NP/out/$f" "$P/notproton/out/"; done
 cp "$NP"/signatures/macos.arm64/*.json "$P/notproton/signatures/macos.arm64/"
 cp "$NP/dylib/version.h" "$P/notproton/dylib/"
 cp "$NP/app/Sources/NotProtonApp/Resources/valve-packages.manifest" "$P/notproton/app/Sources/NotProtonApp/Resources/"
@@ -87,6 +87,7 @@ cp "$ROOT/LICENSE" "$VOL/Licenses/LICENSE.steamplay-mac"
 cp "$NP/LICENSE" "$VOL/Licenses/LICENSE.NotProton"
 cp "$NP/NOTICE" "$VOL/Licenses/NOTICE.NotProton"
 cp "$NP/LICENSE.lsteamclient" "$NP/LICENSE.steam-shim" "$VOL/Licenses/"
+cp "$NP/gamefixes/aion2/LICENSE" "$VOL/Licenses/LICENSE.aion2-wine-compat"
 cp "$ROOT/src/wine/COPYING.LIB" "$VOL/Licenses/COPYING.LIB.Wine"
 cp "$ROOT/src/wine/LICENSE" "$VOL/Licenses/LICENSE.Wine"
 tar -xOf "$ROOT/downloads/MoltenVK-1.4.2-macos.tar" MoltenVK/LICENSE > "$VOL/Licenses/LICENSE.MoltenVK" 2>/dev/null \

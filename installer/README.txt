@@ -66,6 +66,8 @@ This disk image contains binaries built from:
 - Valve's lsteamclient from Proton (see Licenses/LICENSE.lsteamclient), DXMT v0.80 (MIT),
   MoltenVK (Apache-2.0), FFmpeg (LGPL), SDL2 (zlib), gnutls/nettle/gmp (LGPL), FreeType,
   Wine Mono and Wine Gecko
+- aion2-wine-compat by Yuki-fox (MIT, Licenses/LICENSE.aion2-wine-compat):
+  https://github.com/Yuki-fox/aion2-wine-compat, copied into the NotProton fork's gamefixes/aion2
 Runner: @RUNNER_ID@. The licence texts are in the Licenses folder.
 
 CodeWeavers' CrossOver funds most of the Wine development for macOS. If you can, buy it:

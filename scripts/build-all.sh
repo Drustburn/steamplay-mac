@@ -49,13 +49,13 @@ run shim "$ROOT/scripts/build-steam-shim.sh"
 step "Valve's Windows Steam DLLs (Valve CDN, hash-checked)"
 run valve "$ROOT/scripts/fetch-valve-bridge.sh"
 
-step "NotProton fork: Dobby, notproton.dylib, overlay shim, helpers"
+step "NotProton fork: Dobby, notproton.dylib, overlay shim, AION 2 fix, helpers"
 [ -f "$ROOT/notproton/vendor/dobby/CMakeLists.txt" ] || {
     git clone -q --no-checkout https://github.com/jmpews/Dobby.git "$ROOT/notproton/vendor/dobby"
     git -C "$ROOT/notproton/vendor/dobby" checkout -q 5dfc8546954ce3b3198132ab13fddb89ee92cdd7
 }
 [ -f "$ROOT/notproton/build/dobby/libdobby.a" ] || run dobby make -C "$ROOT/notproton" dobby
-run notproton make -C "$ROOT/notproton" out/notproton.dylib overlay-shim iconmaker appinfo
+run notproton make -C "$ROOT/notproton" out/notproton.dylib overlay-shim aion2-compat iconmaker appinfo
 mkdir -p "$ROOT/build/helpers"
 clang -O2 -mmacosx-version-min=14.0 -o "$ROOT/build/helpers/pe-d3d" "$ROOT/notproton/helpers/pe-d3d.c"
 swiftc -O -target arm64-apple-macos14.0 -framework AppKit -framework IOKit \

@@ -47,6 +47,13 @@ macOS client's `steamclient.dylib`, so Steam features (overlay, achievements, cl
 
   CrossOver 26 and other Wine/GPTK setups hang at the splash screen.
 
+  From 2026-10-12 the game hung after `initialize:: done`, with no window and about 220 % CPU
+  ([#2](https://github.com/Drustburn/steamplay-mac/issues/2)). NC Guard's start-up `CPUID`
+  trampoline switches to 32-bit code, which Rosetta does not run. The [AION 2 fix](#aion-2-fix)
+  handles that, and the 3D title screen renders again (2026-10-13, M3 Max, macOS 26.6.2).
+- **The Planet Crafter** (Steam 1284190, Unity, DX12 via D3DMetal): starts on the client from 2026-10-11
+  (1791686101, beta) and the Steam overlay attaches.
+
 ## Requirements
 
 - An Apple Silicon Mac with macOS 14 or later (tested on macOS 26), Rosetta 2, and the Xcode
@@ -96,7 +103,7 @@ only behind a free developer login, so the build does not download it:
    to D3DMetal 3. `GPTK4=/path/to/folder` points it at a copied `redist/` instead.
 
 Pick **D3DMetal 4 (macOS 27)** in a game's *Properties → Compatibility*. You can also set
-`CX_GRAPHICS_BACKEND=d3dmetal4 %command%`. *Automatic* keeps using D3DMetal 3. On an older macOS,
+`CX_GRAPHICS_BACKEND=d3dmetal4` as a launch option. *Automatic* keeps using D3DMetal 3. On an older macOS,
 or in a runner built without it, the game falls back to D3DMetal 3, and `notproton-run.log` says
 so. Apple's Metal 4 renderer in the 4.0 beta ends some games after a minute, so it stays off.
 Turn on *Metal 4 renderer (beta)* (`D3DM_MTL4=1`) to try it.
@@ -125,7 +132,7 @@ scripts/install.sh block-updates  # optional, recommended (see Risks)
 
 You can override any
 [HUD variable](https://developer.apple.com/documentation/xcode/customizing-metal-performance-hud)
-per game as a launch option, for example `MTL_HUD_ELEMENTS=fps,gputime,memory %command%`. Settings
+per game as a launch option, for example `MTL_HUD_ELEMENTS=fps,gputime,memory`. Settings
 for all games go in `~/Library/Application Support/notproton/global.env`, one `KEY=VALUE` per line;
 a game's own launch options take precedence.
 
@@ -136,7 +143,31 @@ Then start Steam. Windows-only games get an **Install** button and default to th
 tool **Steam Play (Wine, self-built)**. Per game, use *Properties → Compatibility* to pick the
 graphics backend (Automatic / D3DMetal / DXMT / WineD3D) and to toggle MetalFX/DLSS, the Metal
 HUD, AVX, msync and Retina mode. You can also set these as launch options, for example
-`CX_GRAPHICS_BACKEND=d3dmetal %command%`.
+`CX_GRAPHICS_BACKEND=d3dmetal`.
+
+Write launch-option variables **without `%command%`**. macOS Steam starts launch options without
+a shell, so with `VAR=value %command%` it tries to run `VAR=value` as the program and fails with
+`OS Error 260` (`AppError_46` in `~/Library/Application Support/Steam/logs/console_log.txt`).
+Without `%command%`, Steam appends the variables to the command line, and the run script takes
+them over. Its log shows them as `launch_env=` in `notproton-run.log`.
+
+### AION 2 fix
+
+The installer ships [aion2-wine-compat](https://github.com/Yuki-fox/aion2-wine-compat) by
+Yuki-fox (MIT, copied unchanged into `notproton/gamefixes/aion2`). It is a small dylib that
+interposes Wine's signal handlers, recognises NC Guard's 64→32-bit `CPUID` trampoline and
+delivers the exception that Windows would raise. It does not change game files or NC Guard.
+
+- It goes to `~/Library/Application Support/notproton/aion2-compat/compat_cpuid.dylib`, and the
+  run script inserts it for AION 2 (3393110) only. `notproton-run.log` then shows
+  `=== aion2-wine-compat inserted ===`.
+- AION 2 needs no launch options. A wrapper script set up by hand (from aion2-wine-compat's or
+  an older guide) can be removed. `NOTPROTON_AION2_COMPAT=0` as a launch option leaves the fix out.
+- A prefix created before 2026-10-12 can keep hanging. Quit Steam, move
+  `~/Library/Application Support/Steam/steamapps/compatdata/3393110` aside, and start the game.
+  Steam creates a new prefix, and the game files stay where they are.
+- The fix matches exact instruction bytes. An AION 2 or NC Guard update can stop it from working.
+  See [Risks](#risks) for anti-cheat.
 
 To uninstall: `scripts/install.sh uninstall-steam` restores Steam.app only.
 `scripts/install.sh uninstall` also removes the runner, the helpers and the update block. Game
@@ -172,7 +203,7 @@ source links in its Read me would point to code that does not match the binaries
 | per-game run script (prefix, bridge, graphics choice) | `~/Library/Application Support/Steam/steamapps/compatdata/<appid>/notproton-run.log` |
 | Wine output of the game | `~/Library/Application Support/notproton/launchers/<appid>/notproton-wine.log` |
 
-For more detail, add `WINEDEBUG=+seh,+loaddll %command%` to the game's launch options.
+For more detail, add `WINEDEBUG=+seh,+loaddll` to the game's launch options.
 
 ## Risks
 

@@ -89,6 +89,8 @@ cmd_support() {
     mkdir -p "$SUP/signatures/macos.arm64"
     cp -f "$NP"/signatures/macos.arm64/*.json "$SUP/signatures/macos.arm64/"
     install_file "$NP/out/overlay-shim.dylib" "$SUP/overlay-shim.dylib"
+    # AION 2's CPUID fix; the run script inserts it for that game only.
+    install_file "$NP/out/compat_cpuid.dylib" "$SUP/aion2-compat/compat_cpuid.dylib"
     install_file "$NP/out/iconmaker" "$SUP/iconmaker"
     install_file "$NP/out/appinfo" "$SUP/appinfo"
     install_file "$ROOT/build/helpers/pe-d3d" "$SUP/pe-d3d"
