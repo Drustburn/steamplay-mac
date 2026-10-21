@@ -1,0 +1,164 @@
+ntdll: Add support for hiding wine version information from applications.
+
+wine-staging's ntdll-Hide_Wine_Exports (Sebastian Lackner, 2015, Wine bug 38656), rebased
+onto the CrossOver 26.3 tree: build_ntdll_module() no longer returns the module, so the
+hidden_exports_init() call moves to its end. With HKCU\Software\Wine HideWineExports=Y (or
+per exe under AppDefaults\<app>.exe), LdrGetProcedureAddress reports wine_get_version,
+wine_get_build_id and wine_get_host_version as missing.
+
+The Witcher 3 5.0 probes GetProcAddress(ntdll, "wine_get_version") and, when it succeeds,
+never initialises NVIDIA Streamline (no DLSS, Reflex or DLSS-G); the run script sets the
+value in that game's prefix.
+
+diff -ru a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+--- a/dlls/ntdll/loader.c	2026-10-20 18:57:02
++++ b/dlls/ntdll/loader.c	2026-10-20 18:57:02
+@@ -88,6 +88,9 @@
+ /* system search path */
+ static const WCHAR system_path[] = L"C:\\windows\\system32;C:\\windows\\system;C:\\windows";
+ 
++#define IS_OPTION_TRUE(ch) ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
++
++
+ static BOOL is_prefix_bootstrap;  /* are we bootstrapping the prefix? */
+ static BOOL wow64_using_32bit_prefix;  /* are we using a 32-bit-only prefix in wow64 mode? */
+ static BOOL imports_fixup_done = FALSE;  /* set once the imports have been fixed up, before attaching them */
+@@ -109,6 +112,8 @@
+ 
+ static struct list dll_dir_list = LIST_INIT( dll_dir_list );  /* extra dirs from LdrAddDllDirectory */
+ 
++static BOOL hide_wine_exports = FALSE;  /* try to hide ntdll wine exports from applications */
++
+ struct ldr_notification
+ {
+     struct list                    entry;
+@@ -2083,6 +2088,96 @@
+ }
+ 
+ 
++/***********************************************************************
++ *           hidden_exports_init
++ *
++ * Initializes the hide_wine_exports options.
++ */
++static void hidden_exports_init( const WCHAR *appname )
++{
++    static const WCHAR configW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e',0};
++    static const WCHAR appdefaultsW[] = {'A','p','p','D','e','f','a','u','l','t','s','\\',0};
++    static const WCHAR hideWineExports[] = {'H','i','d','e','W','i','n','e','E','x','p','o','r','t','s',0};
++    OBJECT_ATTRIBUTES attr;
++    UNICODE_STRING nameW;
++    HANDLE root, config_key, hkey;
++    BOOL got_hide_wine_exports = FALSE;
++    char tmp[80];
++    DWORD dummy;
++
++    RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
++    attr.Length = sizeof(attr);
++    attr.RootDirectory = root;
++    attr.ObjectName = &nameW;
++    attr.Attributes = OBJ_CASE_INSENSITIVE;
++    attr.SecurityDescriptor = NULL;
++    attr.SecurityQualityOfService = NULL;
++    RtlInitUnicodeString( &nameW, configW );
++
++    /* @@ Wine registry key: HKCU\Software\Wine */
++    if (NtOpenKey( &config_key, KEY_QUERY_VALUE, &attr )) config_key = 0;
++    NtClose( root );
++    if (!config_key) return;
++
++    if (appname && *appname)
++    {
++        const WCHAR *p;
++        WCHAR appversion[MAX_PATH+20];
++
++        if ((p = wcsrchr( appname, '/' ))) appname = p + 1;
++        if ((p = wcsrchr( appname, '\\' ))) appname = p + 1;
++
++        wcscpy( appversion, appdefaultsW );
++        wcscat( appversion, appname );
++        RtlInitUnicodeString( &nameW, appversion );
++        attr.RootDirectory = config_key;
++
++        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe */
++        if (!NtOpenKey( &hkey, KEY_QUERY_VALUE, &attr ))
++        {
++            TRACE( "getting HideWineExports from %s\n", debugstr_w(appversion) );
++
++            RtlInitUnicodeString( &nameW, hideWineExports );
++            if (!NtQueryValueKey( hkey, &nameW, KeyValuePartialInformation, tmp, sizeof(tmp), &dummy ))
++            {
++                WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)tmp)->Data;
++                hide_wine_exports = IS_OPTION_TRUE( str[0] );
++                got_hide_wine_exports = TRUE;
++            }
++
++            NtClose( hkey );
++        }
++    }
++
++    if (!got_hide_wine_exports)
++    {
++        TRACE( "getting default HideWineExports\n" );
++
++        RtlInitUnicodeString( &nameW, hideWineExports );
++        if (!NtQueryValueKey( config_key, &nameW, KeyValuePartialInformation, tmp, sizeof(tmp), &dummy ))
++        {
++            WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)tmp)->Data;
++            hide_wine_exports = IS_OPTION_TRUE( str[0] );
++        }
++    }
++
++    NtClose( config_key );
++}
++
++
++/***********************************************************************
++ *           is_hidden_export
++ *
++ * Checks if a specific export should be hidden.
++ */
++static BOOL is_hidden_export( void *proc )
++{
++    return hide_wine_exports && (proc == &wine_get_version ||
++                                 proc == &wine_get_build_id ||
++                                 proc == &wine_get_host_version);
++}
++
++
+ /******************************************************************
+  *		LdrGetProcedureAddress  (NTDLL.@)
+  */
+@@ -2103,7 +2198,7 @@
+     {
+         void *proc = name ? find_named_export( module, exports, exp_size, name->Buffer, -1, NULL, wm, TRUE )
+                           : find_ordinal_export( module, exports, exp_size, ord - exports->Base, NULL, wm, TRUE );
+-        if (proc)
++        if (proc && !is_hidden_export( proc ))
+         {
+             *address = proc;
+             ret = STATUS_SUCCESS;
+@@ -2404,6 +2499,8 @@
+     node_ntdll = wm->ldr.DdagNode;
+     if (TRACE_ON(relay)) RELAY_SetupDLL( module );
+     TRACE_(loaddll)( "Loaded %s at %p: builtin\n", debugstr_w(wm->ldr.FullDllName.Buffer), module);
++
++    hidden_exports_init( wm->ldr.FullDllName.Buffer );
+ }
+ 
+ 
+diff -ru a/dlls/ntdll/ntdll_misc.h b/dlls/ntdll/ntdll_misc.h
+--- a/dlls/ntdll/ntdll_misc.h	2026-10-20 18:57:02
++++ b/dlls/ntdll/ntdll_misc.h	2026-10-20 18:57:02
+@@ -112,6 +112,11 @@
+     return (void *)((char *)module + va);
+ }
+ 
++/* version */
++extern const char * CDECL wine_get_version(void);
++extern const char * CDECL wine_get_build_id(void);
++extern void CDECL wine_get_host_version( const char **sysname, const char **release );
++
+ /* convert from straight ASCII to Unicode without depending on the current codepage */
+ static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
+ {

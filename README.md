@@ -169,6 +169,22 @@ delivers the exception that Windows would raise. It does not change game files o
 - The fix matches exact instruction bytes. An AION 2 or NC Guard update can stop it from working.
   See [Risks](#risks) for anti-cheat.
 
+### DLSS through MetalFX
+
+The MetalFX/DLSS toggle sets `D3DM_ENABLE_METALFX=1`. With a D3DMetal backend the run script
+also copies D3DMetal's `nvngx.dll`, `_nvngx.dll` and `nvapi64.dll` into the prefix's
+`system32`, as Apple's Game Porting Toolkit Read Me asks. Without them, NGX inside a game's
+Streamline finds no `_nvngx.dll` and refuses Wine's unsigned placeholder `nvngx.dll`.
+Streamline then unloads DLSS, although the GPU reports as NVIDIA.
+
+**The Witcher 3** (292030) 5.0 looks up `wine_get_version` in ntdll and skips Streamline
+under Wine, so DLSS never appears. The runner carries wine-staging's `HideWineExports`, and
+the run script turns it on in this game's prefix. `NOTPROTON_HIDE_WINE=1` or `=0` as a launch
+option decides for any game. Pick D3DMetal (4 on macOS 27) and turn on DLSS in
+*Properties → Compatibility*; DLSS then shows under Anti-aliasing. Frame generation does not
+work (D3DMetal lacks `NvAPI_D3D_SetReflexSync`), and turning on ray tracing hung the game in
+testing.
+
 To uninstall: `scripts/install.sh uninstall-steam` restores Steam.app only.
 `scripts/install.sh uninstall` also removes the runner, the helpers and the update block. Game
 prefixes in `steamapps/compatdata` are kept. To get Valve's original signature back, reinstall

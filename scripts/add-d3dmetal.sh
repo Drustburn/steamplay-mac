@@ -50,6 +50,10 @@ done
 # DLSS -> MetalFX: the MetalFX NGX shim takes nvngx's place (as the MacPorts d3dmetal port does)
 cp "$g/wine/x86_64-windows/nvngx-on-metalfx.dll" "$R/x86_64-windows/nvngx.dll"
 ln -s ../../../external/libd3dshared.dylib "$R/x86_64-unix/nvngx.so"
+# NGX in a game's Streamline opens _nvngx.dll in system32 before nvngx.dll, and Wine loads a
+# builtin by its name, so the copy the run script puts there needs a builtin of that name.
+cp "$R/x86_64-windows/nvngx.dll" "$R/x86_64-windows/_nvngx.dll"
+ln -s ../../../external/libd3dshared.dylib "$R/x86_64-unix/_nvngx.so"
 if [ -f "$WORK/$a/License.rtf" ]; then cp "$WORK/$a/License.rtf" "$RUNNER/lib/external/D3DMetal-License.rtf"; fi
 echo "D3DMetal 3.0: $RUNNER/lib/external"
 
@@ -101,6 +105,8 @@ done
 if [ -f "$gptk4_lib/wine/x86_64-windows/nvngx-on-metalfx.dll" ]; then
     cp "$gptk4_lib/wine/x86_64-windows/nvngx-on-metalfx.dll" "$R/x86_64-windows/nvngx.dll"
     ln -s ../../../external/d3dmetal4/libd3dshared.dylib "$R/x86_64-unix/nvngx.so"
+    cp "$R/x86_64-windows/nvngx.dll" "$R/x86_64-windows/_nvngx.dll"
+    ln -s ../../../external/d3dmetal4/libd3dshared.dylib "$R/x86_64-unix/_nvngx.so"
 fi
 lic="$(find "$gptk4_lib/../.." -maxdepth 3 -iname 'licen[cs]e*.rtf' 2>/dev/null | head -1 || true)"
 if [ -n "$lic" ]; then cp "$lic" "$E/D3DMetal-License.rtf"; fi
